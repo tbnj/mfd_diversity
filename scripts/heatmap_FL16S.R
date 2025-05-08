@@ -2,27 +2,24 @@
 library(tidyverse)
 library(ampvis2)
 
-source('MFD_colors.R')
+source('scripts/MFD_colors.R')
 
 setwd("/mfd_diversity")
 
 
 ### Import data
+filter <- data.table::fread("output/2025-04-15_MFD_FL16S_combined_diversity_MFDO1.tsv") %>%
+  select(complex) %>%
+  distinct() %>%
+  pull(complex)
+
 ## Filter and create "complex" correponding to full MFDO1 string for 10 km reference grid samples
-metadata <- data.table::fread('data/2024-05-10_samples-grid-10km.csv', na.strings = "") %>%
-  mutate(complex = str_c(mfd_sampletype, mfd_areatype, mfd_hab1, sep = ", ")) %>%
-  group_by(complex) %>%
-  mutate(complex_size = n()) %>%
-  mutate(label = str_c(complex, ", n = ", complex_size, sep = "")) %>%
-  ungroup() %>%
-  filter(!complex %in% c("Water, Subterranean, Freshwater",
-                         "Water, Urban, Sandfilter",
-                         "Soil, Urban, Other",
-                         "Sediment, Urban, Other",
-                         "Soil, Urban, Roadside",
-                         "Soil, Subterranean, Urban")) %>%
+metadata <- data.table::fread('data/2025-02-19_MFD_samples_grid_10km.tsv', na.strings = "") %>%
+  mutate(across(mfd_hab1, ~str_replace(., "Sclerophyllous scrub", "Temperate heath and scrub")),
+         across(mfd_hab2, ~str_replace(., "Scrub", "Sclerophyllous scrub"))) %>%
+  filter(complex %in% filter) %>%
   mutate(across(complex, ~factor(., levels = names(mfdo1.palette)))) %>%
-  select(-project_id)
+  select(fieldsample_barcode, everything())
 
 ## Create group summary
 groups.summary <- metadata %>%
@@ -34,12 +31,14 @@ samples.subset <- metadata %>%
   pull(fieldsample_barcode)
 
 ## Import count data of the genus-aggregated observational table of 16S dervied from metagenomes
-data <- data.table::fread('data/2024-03-07_arcbac-rarefaction-count.csv', na.strings = "")
+data <- data.table::fread('data/2025-02-13_MFD_arcbac_genus_rarefaction_rel.csv', na.strings = "")
 
 ## Subset data to 10 km reference samples
 data.subset <- data %>%
   select(all_of(samples.subset), Kingdom:Genus) %>%
   filter(rowSums(across(where(is.numeric)))!=0)
+
+rm(data)
 
 ## Create ampvis2 object with data subset
 ampvis.grid <- amp_load(otutable = data.subset,
@@ -47,7 +46,7 @@ ampvis.grid <- amp_load(otutable = data.subset,
 
 ## Normalise and remove unclassified fraction
 ampvis.grid.subset <- ampvis.grid %>%
-  amp_subset_taxa(normalise = TRUE, tax_vector = c("Unclassified"), remove = TRUE)
+  amp_subset_taxa(normalise = FALSE, tax_vector = c("Unclassified"), remove = TRUE)
 
 ## Create phylum level aggregated wide data frame using ampvis2
 heatmap.phylum <- ampvis.grid.subset %>%
@@ -59,16 +58,19 @@ heatmap.phylum <- ampvis.grid.subset %>%
               plot_values_size = 3,
               plot_na = TRUE,
               plot_values = FALSE,
-              textmap = TRUE)
+              textmap = TRUE) %>%
+  rownames_to_column(var = "Phylum")
 
 ## Pivot longer
-data.heatmap.phylum <- heatmap.phylum %>%
-  rownames_to_column(var = "Phylum") %>%
-  pivot_longer(!Phylum, names_to = "complex", values_to = "abund")
+# data.heatmap.phylum <- heatmap.phylum %>%
+#   rownames_to_column(var = "Phylum") %>%
+#   pivot_longer(!Phylum, names_to = "complex", values_to = "abund")
 
 ## Write table to output
-data.table::fwrite(data.heatmap.phylum, "output/2024-03-19_phylum-heatmap-grid.csv")
+data.table::fwrite(heatmap.phylum, sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE,
+                   paste0("output/", format(Sys.time(), "%Y-%m-%d"), "_MFD_phylum_heatmap_grid_MFDO1.tsv"))
 
 
 ### Save iamge
-save.image(file = 'output/2024-03-19_heatmap.RData')
+save.image(paste0('output/', format(Sys.time(), "%Y-%m-%d"), "_heatmap.RData"))
+

@@ -1,21 +1,9 @@
 ### Setup env
 library(tidyverse)
-library(knitr)
-library(openxlsx)
-library(ggraph)
-library(igraph)
-library(gtools)
-library(treedataverse)
-library(dendroextras)
-library(ggvenn)
-library(ggtreeExtra)
-library(ggnewscale)
-library(wesanderson)
-library(ape)
-library(gridExtra)
-library(pvclust)
 library(vegan)
 library(parallelDist)
+library(ggtree)
+
 
 set.seed(123)
 
@@ -23,7 +11,7 @@ options(stringsAsFactors = F, gsubfn.engine = "R")
 
 Sys.setenv("LANGUAGE"="En")
 
-source("MFD_colors.R")
+source("scripts/MFD_colors.R")
 
 setwd("/mfd_diversity")
 
@@ -34,34 +22,37 @@ output.path <- paste0(wd, '/output')
 
 ### Load data
 ## MFD Ontology
-mfd_ontology <- read.xlsx(paste0(data.path, "/2023-12-21_mfd-habitat-ontology.xlsx"), sheet = 1)
+mfd_ontology <- readxl::read_excel(paste0(data.path, "/2025-02-11_mfd-habitat-ontology.xlsx"), sheet = 1)
 
 ## Bray-Curtis matix
-BC.df <- data.table::fread(paste0(data.path, "/2024-03-19_BC-distance-subset.csv"))
+BC.df <- data.table::fread(paste0(output.path, "/2025-04-15_MFD_BC_distance_grid_filt.csv")) %>%
+  column_to_rownames(var = "V1")
 
 ## Set rownames for BC matrix
-BC.df <- BC.df %>%
-  `rownames<-`(colnames(BC.df))
+# BC.df <- BC.df %>%
+#   `rownames<-`(colnames(BC.df))
 
 ## MFD db
-mfd_db <- read.xlsx(paste0(data.path, "/2024-02-13_mfd_db.xlsx"), sheet = 1) %>%
+mfd_db <- readxl::read_excel(paste0(data.path, "/2025-04-14_mfd_db.xlsx"), sheet = 1) %>%
   filter(fieldsample_barcode %in% colnames(BC.df))
 
 ## 10 km grid representatives
-rep.10km.df <- read_csv(paste0(data.path, "/2024-05-10_samples-grid-10km.csv")) %>%
+rep.10km.df <- data.table::fread(paste0(data.path, "/2025-02-19_MFD_samples_grid_10km.tsv")) %>%
   filter(fieldsample_barcode %in% colnames(BC.df))
 
 ## Heatmap data frame
-phylum.df <- read_csv(paste0(data.path, "/2024-03-19_phylum-heatmap-grid.csv"))
+phylum.df <- data.table::fread(paste0(output.path, "/2025-04-15_MFD_phylum_heatmap_grid_MFDO1.tsv"))
 
 ## Alpha diversity data frame
-diversity.df <- read_csv(paste0(data.path, "/2024-03-19_alpha-diversity-fl.csv"))
+diversity.df <- data.table::fread(paste0(output.path, "/2025-04-15_MFD_FL16S_alpha_diversity_MFDO1.tsv"))
+
+signif <- data.table::fread(paste0(output.path, "/2025-04-23_MFD_FL16S_alpha_diveristy_analysis.csv"))
 
 ## Gamma diversity data frame
-gamma.df <- read_csv(paste0(data.path, "/2024-03-19_gamma-diversity-fl.csv"))
+gamma.df <- data.table::fread(paste0(output.path, "/2025-04-15_MFD_FL16S_gamma_diversity_MFDO1.tsv"))
 
 ## Genus aggregated observational table
-reduced.genus <-  data.table::fread(paste0(data.path, "/2024-03-07_arcbac-rarefaction-rel.csv")) %>%
+reduced.genus <-  data.table::fread(paste0(data.path, "/2025-02-13_MFD_arcbac_genus_rarefaction_rel.csv")) %>%
   select(any_of(rep.10km.df$fieldsample_barcode), Kingdom:Genus) %>%
   filter(rowSums(across(where(is.numeric)))!=0)
 
@@ -116,7 +107,7 @@ BC.wrap <- function(counts, lab){
                       binary = F,
                       diag = T,
                       upper = T,
-                      threads = 10) %>%
+                      threads = 50) %>%
   as.matrix()
   mat.to_return <- get_av_dist(mat, lab) %>%
     as.dist()
@@ -130,13 +121,6 @@ lab.df <- rep_10k_ontology %>%
                 ~str_replace(.,
                              "Soil, Natural, Sclerophyllous scrub",
                              "Soil, Natural, Temperate heath and scrub"))) %>%
-  filter(!lab %in% c("Water, Subterranean, Freshwater",
-                     "Water, Urban, Sandfilter",
-                     "Soil, Urban, Other",
-                     "Sediment, Urban, Other",
-                     "Soil, Urban, Roadside",
-                     "Soil, Subterranean, Urban",
-                     "Soil, Natural, NA")) %>%
   select(fieldsample_barcode, lab)
 
 ## MFDO1 summary (mean dissimilarity)
@@ -166,13 +150,6 @@ ab.df <- rep_10k_ontology %>%
                 ~str_replace(.,
                              "Soil, Natural, Sclerophyllous scrub",
                              "Soil, Natural, Temperate heath and scrub"))) %>%
-  filter(!lab %in% c("Water, Subterranean, Freshwater",
-                     "Water, Urban, Sandfilter",
-                     "Soil, Urban, Other",
-                     "Sediment, Urban, Other",
-                     "Soil, Urban, Roadside",
-                     "Soil, Subterranean, Urban",
-                     "Soil, Natural, NA")) %>%
   select(fieldsample_barcode, lab)
 
 ## hclust with BC-wrapper
@@ -180,22 +157,24 @@ createHclustObject <- function(x)hclust(BC.wrap(counts = as.matrix(x),
                                                 lab = (lab.df %>%
                                                          filter(fieldsample_barcode%in%rownames(reduced.genus.hell)))), "ave")
 
-## bootstrap
+## bootstrap - github sgibb
 set.seed(123)
 b <- bootstrap::bootstrap(reduced.genus.hell,
-                          fun = createHclustObject,
-                          n = 10L,
-                          mc.cores = 15)
+               fun = createHclustObject,
+               n = 100L,
+               mc.cores = 60)
 
 ## Write to output
-write.csv(paste0(output.path, "/bootstrap_weigths.csv"))
+data.table::fwrite(as.data.frame(b), sep = "\t", row.names = FALSE, col.names = TRUE, quote = FALSE,
+                   paste0('output/', format(Sys.time(), "%Y-%m-%d"), "_MFD_16S_bootstrap_weights_MFDO1.tsv"))
+
 
 ## Plot results
 hc <- createHclustObject(reduced.genus.hell)
 plot(hc)
 
 ## Draw bootstrap values to corresponding node
-bootlabels.hclust(hc, b, col="blue")
+bootstrap::bootlabels.hclust(hc, b, col="blue")
 
 
 ### Hab summarisation
@@ -206,13 +185,6 @@ mfdo1.dist.full <- get_av_dist((BC.df %>% as.data.frame() %>% `rownames<-`(colna
                                                   ~str_replace(.,
                                                                "Soil, Natural, Sclerophyllous scrub",
                                                                "Soil, Natural, Temperate heath and scrub"))) %>%
-                                    filter(!lab %in% c("Water, Subterranean, Freshwater",
-                                                       "Water, Urban, Sandfilter",
-                                                       "Soil, Urban, Other",
-                                                       "Sediment, Urban, Other",
-                                                       "Soil, Urban, Roadside",
-                                                       "Soil, Subterranean, Urban",
-                                                       "Soil, Natural, NA")) %>%
                                     select(fieldsample_barcode, lab)))
 
 ## Average distance for 10 km reference subset
@@ -222,13 +194,6 @@ mfdo1.dist.rep <- get_av_dist((BC.df %>% as.data.frame() %>% `rownames<-`(colnam
                                                   ~str_replace(.,
                                                                "Soil, Natural, Sclerophyllous scrub",
                                                                "Soil, Natural, Temperate heath and scrub"))) %>%
-                                    filter(!lab %in% c("Water, Subterranean, Freshwater",
-                                                       "Water, Urban, Sandfilter",
-                                                       "Soil, Urban, Other",
-                                                       "Sediment, Urban, Other",
-                                                       "Soil, Urban, Roadside",
-                                                       "Soil, Subterranean, Urban",
-                                                       "Soil, Natural, NA")) %>%
                                     select(fieldsample_barcode, lab)))
 
 
@@ -236,12 +201,13 @@ mfdo1.dist.rep <- get_av_dist((BC.df %>% as.data.frame() %>% `rownames<-`(colnam
 
 ## Transform phylum level 16S metagenome profiles
 phylum.long <- (phylum.df %>%
-                  pivot_longer(names_to = "hab", values_to = "rel.ab", -Phylum) %>%
+                  pivot_longer(names_to = "complex", values_to = "rel.ab", -Phylum) %>%
                   mutate(rel.ab = as.numeric(rel.ab),
-                         Phylum = factor(Phylum, levels = phylum.df$Phylum)))[c("hab", "rel.ab", "Phylum")]
-phylum.long <- (phylum.df %>%
-  mutate(hab = complex,
-         rel.ab = abund))[c("hab", "rel.ab", "Phylum")]
+                         Phylum = factor(Phylum, levels = phylum.df$Phylum)))[c("complex", "rel.ab", "Phylum")]
+
+# phylum.long <- (phylum.df %>%
+#   mutate(hab = complex,
+#          rel.ab = abund))[c("hab", "rel.ab", "Phylum")]
 
 ## Sample count summary of 16S metagenome profiles
 dd.MG.n <- rep_10k_ontology %>%
@@ -250,13 +216,6 @@ dd.MG.n <- rep_10k_ontology %>%
                                                   ~str_replace(.,
                                                                "Soil, Natural, Sclerophyllous scrub",
                                                                "Soil, Natural, Temperate heath and scrub"))) %>%
-                                    filter(!lab %in% c("Water, Subterranean, Freshwater",
-                                                       "Water, Urban, Sandfilter",
-                                                       "Soil, Urban, Other",
-                                                       "Sediment, Urban, Other",
-                                                       "Soil, Urban, Roadside",
-                                                       "Soil, Subterranean, Urban",
-                                                       "Soil, Natural, NA")) %>%
   group_by(`MFDO1 cumulative`) %>%
   summarise(n=n())
 
@@ -276,20 +235,22 @@ p.colors.rep <- p.rep %<+% data.frame(label = colnames(mfdo1.dist.rep),
   geom_tiplab(aes(label = label), align = T, linesize = .5, as_ylab = T) +
   geom_tippoint(aes(fill = label, size = beta.within), shape = 21) +
   scale_fill_manual(values = mfdo1.palette) +
+  scale_size(range = c(3,6)) +
   guides(fill = "none") +
-  new_scale_fill()
+  ggnewscale::new_scale_fill()
 
 p.bootstrap.rep <- p.colors.rep %<+% b.df +
   geom_point(data = (. %>% filter(!isTip)), aes(fill=bootstrap), shape = 23, size = 3, color = "black") +
   scale_fill_distiller(type = "seq", palette = "Greys", direction = 1,  na.value = NA) +
   scale_fill_stepsn(colors = rev(grey.colors(8))[c(1, 8)], na.value = NA,
-                       limits = c(0.7, 1),
-                       breaks = c(0.7, 0.8, 0.9, 1.0),
-                       labels = c("0.7", "0.8", "0.9", "1.0"),
-                       name = "Bootstrap") +
+                    limits = c(0.9, 1),
+                    breaks = c(0.95, 1),
+                    labels = c("<0.95", ">0.95"),
+                    name = "Bootstrap") +
+  guides(fill = guide_legend(override.aes = list(shape = 23))) +
   scale_color_continuous(na.value = NA) +
-  new_scale_fill() +
-  new_scale_color()
+  ggnewscale::new_scale_fill() +
+  ggnewscale::new_scale_color()
 
 ## Phylum level 16S metagenome profiles
 p.fingerprint <- p.bootstrap.rep +
@@ -301,7 +262,9 @@ p.fingerprint <- p.bootstrap.rep +
             lwd = .25,
             linetype = 1) +
   scale_x_discrete() +
-  scale_fill_viridis_c() +
+  scale_fill_viridis_c(trans = "sqrt", 
+                       breaks = c(0.01, 1, 4, 10, 20, 30),
+                       labels = c("0.01", "1", "4", "10", "20", "30")) +
   theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust = 1)) +
   guides(size = "none") +
   theme(legend.position="bottom")
@@ -315,17 +278,17 @@ p.n.MG <- p.bootstrap.rep +
 
 ## Alpha diversity based on FL16S amplicons
 p.a_div <- p.n.MG +
-  new_scale_fill() +
+  ggnewscale::new_scale_fill() +
   geom_facet(panel = "Alpha diversity",
-             data = diversity.df[c("complex", "observed_species")],
+             data = diversity.df[,c("complex", "observed_species")],
              geom = geom_jitter,
-             orientation = "y",
+             # orientation = "y",
              aes(x = observed_species, color = label),
              size = 1.0) +
   scale_fill_manual(values = mfdo1.palette) +
   scale_color_manual(values = mfdo1.palette) +
   geom_facet(panel = "Alpha diversity",
-             data = diversity.df[c("complex", "observed_species")],
+             data = diversity.df[,c("complex", "observed_species")],
              geom = geom_boxplot,
              orientation = "y",
              aes(x = observed_species, fill = label),
@@ -335,40 +298,52 @@ p.a_div <- p.n.MG +
              outlier.size = -1) +
   scale_fill_manual(values = mfdo1.palette) +
   guides(fill = "none",
-         color = "none")
+         color = "none") +
+  geom_facet(panel = "Alpha diversity",
+             data = signif,
+             geom = geom_text,
+             aes(x = 250, label = cld)) +
+  guides(color = "none")
+
+p.a_div
 
 ## Gamma diversity based on FL16S amplicons
 p.c_div <- p.a_div +
   geom_facet(pane = "Gamma diversity",
-             data = (gamma.df %>% filter(Diversity == "Shannon diversity")),
+             data = (gamma.df %>% filter(Hill_diversity == "Shannon diversity")),
              geom = geom_errorbar,
              aes(x= Estimator, xmin = LCL, xmax = UCL),
              color = "black",
              width = 0.5,
              orientation = "y") +
   geom_facet(panel = "Gamma diversity",
-             data = (gamma.df %>% filter(Diversity == "Shannon diversity")),
-             geom = geom_point,
+             data = (gamma.df %>% filter(Hill_diversity == "Shannon diversity")),
+             geom = geom_col,
              aes(x = Estimator, fill = label),
-             pch = 21,
+             # pch = 21,
              color = "black",
              width = 1,
-             alpha = 1,
+             alpha = 0.8,
              orientation = "y")
 
 ## Sample count summary of FL16S amplicons
 p.n.16S <- p.c_div +
   geom_facet(panel = "# FL16S",
-             data = (gamma.df %>% filter(Diversity == "Shannon diversity")),
+             data = (gamma.df %>% filter(Hill_diversity == "Shannon diversity")),
              geom = geom_text,
-             aes(x = 1, label = paste0("n = ", size))) +
+             aes(x = 1, label = paste0("n = ", samples))) +
   theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust = 1))
 
 ## Render and save plots in svg format
 p.n.16S
 
-ggsave(p.n.16S, filename = paste0(output.path, "/tree_cont_scale.svg"), width = 12, height = 4, dpi = "retina")
+ggsave(p.n.16S, filename = paste0("output/", format(Sys.time(), "%Y-%m-%d"), "_16S_tree_cont_scale.svg"), 
+       width = 12, height = 4, dpi = "retina")
 
 p.fingerprint
 
-ggsave(p.fingerprint, filename = paste0(output.path, "/tree_disc_scale.svg"), width = 8, height = 6, dpi = "retina")
+ggsave(p.fingerprint, filename = paste0("output/", format(Sys.time(), "%Y-%m-%d"), "_16S_tree_disc_scale.svg"), 
+       width = 8, height = 6, dpi = "retina")
+
+save.image(paste0('output/', format(Sys.time(), "%Y-%m-%d"), "_MFD_FL16S_combined_diversity.RData"))
+
