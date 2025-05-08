@@ -11,7 +11,7 @@ All scritps are needed to make the combined figure panel at the end.
 `scripts/diversity_FL16S.R` calculates alpha diversity using the near full-length 16S OTUs from the UMI Nanopore data across the MFDO1 ontology level. It performs the statistical analysis on alpha diveristy and combines the alpha with the gamma diversity calculated for the same data.
 
 ### Metagenomic 16S data 
-`scripts/heatmap_16S.R` recreates the prokaryotic fingerprint profile across the MFDO1 ontology level. The script also renders the figures used in the manuscript. 
+`scripts/heatmap_16S.R` recreates the prokaryotic fingerprint profile across the MFDO1 ontology level. 
 
 
 `scripts/permanova_contrasts_16S.R` performs the PERMANOVA and contrasts abalysis across the MFDO1 ontology level.
